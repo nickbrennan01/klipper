@@ -667,7 +667,6 @@ class GCodeParser:
                 gcode_pos, base_pos, homing_pos))
     def request_restart(self, result):
         if self.is_printer_ready:
-            self.respond_info("Preparing to restart...")
             self.toolhead.motor_off()
             print_time = self.toolhead.get_last_move_time()
             for heater in self.heaters:
@@ -696,7 +695,7 @@ class GCodeParser:
             self._respond_state("Ready")
             return
         msg = self.printer.get_state_message()
-        self._respond_state("Not ready")
+        msg = msg.rstrip() + "\nKlipper state: Not ready"
         self.respond_error(msg)
     cmd_HELP_when_not_ready = True
     def cmd_HELP(self, params):
