@@ -247,16 +247,20 @@ class GCodeParser:
             pending_commands = self.pending_commands
         if self.fd_handle is None:
             self.fd_handle = self.reactor.register_fd(self.fd, self.process_data)
-    def process_batch(self, command):
+    def process_batch(self, commands):
         if self.is_processing_data:
             return False
         self.is_processing_data = True
         try:
-            self.process_commands([command], need_ack=False)
-        finally:
+            self.process_commands(commands, need_ack=False)
+        except error as e:
             if self.pending_commands:
                 self.process_pending()
             self.is_processing_data = False
+            raise
+        if self.pending_commands:
+            self.process_pending()
+        self.is_processing_data = False
         return True
     def run_script_from_command(self, script):
         prev_need_ack = self.need_ack
@@ -265,16 +269,15 @@ class GCodeParser:
         finally:
             self.need_ack = prev_need_ack
     def run_script(self, script):
-        curtime = self.reactor.monotonic()
-        for line in script.split('\n'):
-            while 1:
-                try:
-                    res = self.process_batch(line)
-                except:
-                    break
-                if res:
-                    break
-                curtime = self.reactor.pause(curtime + 0.100)
+        commands = script.split('\n')
+        curtime = None
+        while 1:
+            res = self.process_batch(commands)
+            if res:
+                break
+            if curtime is None:
+                curtime = self.reactor.monotonic()
+            curtime = self.reactor.pause(curtime + 0.100)
     # Response handling
     def ack(self, msg=None):
         if not self.need_ack or self.is_fileinput:
@@ -517,7 +520,7 @@ class GCodeParser:
                 axes.append(self.axis2pos[axis])
         if not axes:
             axes = [0, 1, 2]
-        homing_state = homing.Homing(self.toolhead)
+        homing_state = homing.Homing(self.printer)
         if self.is_fileinput:
             homing_state.set_no_verify_retract()
         try:
