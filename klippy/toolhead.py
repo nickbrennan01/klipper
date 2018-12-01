@@ -264,15 +264,19 @@ class ToolHead:
         flush_to_time = self.print_time - self.move_flush_time
         for m in self.all_mcus:
             m.flush_moves(flush_to_time)
-    def get_next_move_time(self):
-        if not self.sync_print_time:
-            return self.print_time
-        self.sync_print_time = False
-        est_print_time = self.mcu.estimated_print_time(self.reactor.monotonic())
+    def _calc_print_time(self):
+        curtime = self.reactor.monotonic()
+        est_print_time = self.mcu.estimated_print_time(curtime)
         if est_print_time + self.buffer_time_start > self.print_time:
             self.print_time = est_print_time + self.buffer_time_start
             self.last_print_start_time = self.print_time
-        self.reactor.update_timer(self.flush_timer, self.reactor.NOW)
+            self.printer.send_event("toolhead:sync_print_time",
+                                    curtime, est_print_time, self.print_time)
+    def get_next_move_time(self):
+        if self.sync_print_time:
+            self.sync_print_time = False
+            self.reactor.update_timer(self.flush_timer, self.reactor.NOW)
+            self._calc_print_time()
         return self.print_time
     def _flush_lookahead(self, must_sync=False):
         sync_print_time = self.sync_print_time
@@ -287,11 +291,13 @@ class ToolHead:
                 m.flush_moves(self.print_time)
     def get_last_move_time(self):
         self._flush_lookahead()
-        return self.get_next_move_time()
+        if self.sync_print_time:
+            self._calc_print_time()
+        return self.print_time
     def reset_print_time(self, min_print_time=0.):
         self._flush_lookahead(must_sync=True)
-        self.print_time = max(min_print_time, self.mcu.estimated_print_time(
-            self.reactor.monotonic()))
+        est_print_time = self.mcu.estimated_print_time(self.reactor.monotonic())
+        self.print_time = max(min_print_time, est_print_time)
     def _check_stall(self):
         eventtime = self.reactor.monotonic()
         if self.sync_print_time:
@@ -388,6 +394,10 @@ class ToolHead:
         is_active = buffer_time > -60. or not self.sync_print_time
         return is_active, "print_time=%.3f buffer_time=%.3f print_stall=%d" % (
             self.print_time, max(buffer_time, 0.), self.print_stall)
+    def check_busy(self, eventtime):
+        est_print_time = self.mcu.estimated_print_time(eventtime)
+        lookahead_empty = not self.move_queue.queue
+        return self.print_time, est_print_time, lookahead_empty
     def get_status(self, eventtime):
         print_time = self.print_time
         estimated_print_time = self.mcu.estimated_print_time(eventtime)
