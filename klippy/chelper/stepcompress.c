@@ -34,7 +34,7 @@ struct stepcompress {
     uint32_t max_error;
     double mcu_time_offset, mcu_freq;
     // Message generation
-    uint64_t last_step_clock, homing_clock;
+    uint64_t last_step_clock;
     struct list_head msg_queue;
     uint32_t queue_step_msgid, set_next_step_dir_msgid, oid;
     int sdir, invert_sdir;
@@ -281,9 +281,6 @@ stepcompress_flush(struct stepcompress *sc, uint64_t move_clock)
         int32_t addfactor = move.count*(move.count-1)/2;
         uint32_t ticks = move.add*addfactor + move.interval*move.count;
         sc->last_step_clock += ticks;
-        if (sc->homing_clock)
-            // When homing, all steps should be sent prior to homing_clock
-            qm->min_clock = qm->req_clock = sc->homing_clock;
         list_add_tail(&qm->node, &sc->msg_queue);
 
         if (sc->queue_pos + move.count >= sc->queue_next) {
@@ -300,14 +297,12 @@ static int
 stepcompress_flush_far(struct stepcompress *sc, uint64_t abs_step_clock)
 {
     uint32_t msg[5] = {
-        sc->queue_step_msgid, sc->oid, abs_step_clock - sc->last_step_clock, 1, 0
+        sc->queue_step_msgid, sc->oid, abs_step_clock - sc->last_step_clock,
+        1, 0
     };
     struct queue_message *qm = message_alloc_and_encode(msg, 5);
     qm->min_clock = sc->last_step_clock;
     sc->last_step_clock = qm->req_clock = abs_step_clock;
-    if (sc->homing_clock)
-        // When homing, all steps should be sent prior to homing_clock
-        qm->min_clock = qm->req_clock = sc->homing_clock;
     list_add_tail(&qm->node, &sc->msg_queue);
     return 0;
 }
@@ -326,7 +321,7 @@ set_next_step_dir(struct stepcompress *sc, int sdir)
         sc->set_next_step_dir_msgid, sc->oid, sdir ^ sc->invert_sdir
     };
     struct queue_message *qm = message_alloc_and_encode(msg, 3);
-    qm->req_clock = sc->homing_clock ?: sc->last_step_clock;
+    qm->req_clock = sc->last_step_clock;
     list_add_tail(&qm->node, &sc->msg_queue);
     return 0;
 }
@@ -343,17 +338,6 @@ stepcompress_reset(struct stepcompress *sc, uint64_t last_step_clock)
     return 0;
 }
 
-// Indicate the stepper is in homing mode (or done homing if zero)
-int __visible
-stepcompress_set_homing(struct stepcompress *sc, uint64_t homing_clock)
-{
-    int ret = stepcompress_flush(sc, UINT64_MAX);
-    if (ret)
-        return ret;
-    sc->homing_clock = homing_clock;
-    return 0;
-}
-
 // Queue an mcu command to go out in order with stepper commands
 int __visible
 stepcompress_queue_msg(struct stepcompress *sc, uint32_t *data, int len)
@@ -363,7 +347,7 @@ stepcompress_queue_msg(struct stepcompress *sc, uint32_t *data, int len)
         return ret;
 
     struct queue_message *qm = message_alloc_and_encode(data, len);
-    qm->req_clock = sc->homing_clock ?: sc->last_step_clock;
+    qm->req_clock = sc->last_step_clock;
     list_add_tail(&qm->node, &sc->msg_queue);
     return 0;
 }
@@ -438,7 +422,8 @@ queue_append_slow(struct stepcompress *sc, double rel_sc)
 
     if (sc->queue_next - sc->queue_pos > 65535 + 2000) {
         // No point in keeping more than 64K steps in memory
-        uint32_t flush = *(sc->queue_next-65535) - (uint32_t)sc->last_step_clock;
+        uint32_t flush = (*(sc->queue_next-65535)
+                          - (uint32_t)sc->last_step_clock);
         int ret = stepcompress_flush(sc, sc->last_step_clock + flush);
         if (ret)
             return ret;
@@ -566,7 +551,8 @@ steppersync_free(struct steppersync *ss)
 
 // Set the conversion rate of 'print_time' to mcu clock
 void __visible
-steppersync_set_time(struct steppersync *ss, double time_offset, double mcu_freq)
+steppersync_set_time(struct steppersync *ss, double time_offset
+                     , double mcu_freq)
 {
     int i;
     for (i=0; i<ss->sc_num; i++) {
