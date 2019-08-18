@@ -27,7 +27,7 @@ alloc_init(void)
 DECL_INIT(alloc_init);
 
 // Allocate an area of memory
-static void *
+void *
 alloc_chunk(size_t size)
 {
     if (alloc_end + size > dynmem_end())
@@ -258,7 +258,7 @@ command_get_uptime(uint32_t *args)
 DECL_COMMAND_FLAGS(command_get_uptime, HF_IN_SHUTDOWN, "get_uptime");
 
 #define SUMSQ_BASE 256
-DECL_CONSTANT(STATS_SUMSQ_BASE, SUMSQ_BASE);
+DECL_CONSTANT("STATS_SUMSQ_BASE", SUMSQ_BASE);
 
 void
 stats_update(uint32_t start, uint32_t cur)

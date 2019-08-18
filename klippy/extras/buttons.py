@@ -82,10 +82,12 @@ class MCU_buttons:
         clock = self.mcu.get_query_slot(self.oid)
         rest_ticks = self.mcu.seconds_to_clock(QUERY_TIME)
         self.mcu.add_config_cmd(
-            "buttons_query oid=%d clock=%d rest_ticks=%d retransmit_count=%d" % (
-                self.oid, clock, rest_ticks, RETRANSMIT_COUNT), is_init=True)
-        self.mcu.register_msg(
-            self.handle_buttons_state, "buttons_state", self.oid)
+            "buttons_query oid=%d clock=%d"
+            " rest_ticks=%d retransmit_count=%d invert=%d" % (
+                self.oid, clock, rest_ticks, RETRANSMIT_COUNT,
+                self.invert), is_init=True)
+        self.mcu.register_response(self.handle_buttons_state,
+                                   "buttons_state", self.oid)
     def handle_buttons_state(self, params):
         # Expand the message ack_count from 8-bit
         ack_count = self.ack_count
@@ -148,6 +150,20 @@ class PrinterButtons:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.mcu_buttons = {}
+        self.adc_buttons = {}
+    def register_adc_button(
+            self, pin, min_val, max_val, pullup, callback, debug=False):
+        adc_buttons = self.adc_buttons.get(pin)
+        if adc_buttons is None:
+            self.adc_buttons[pin] = adc_buttons = MCU_ADC_buttons(
+                self.printer, pin, pullup, debug)
+        adc_buttons.setup_button(min_val, max_val, callback)
+    def register_adc_button_push(
+            self, pin, min_val, max_val, pullup, callback, debug=False):
+        def helper(eventtime, state, callback=callback):
+            if state:
+                callback(eventtime)
+        self.register_adc_button(pin, min_val, max_val, pullup, helper, debug)
     def register_buttons(self, pins, callback):
         # Parse pins
         ppins = self.printer.lookup_object('pins')
